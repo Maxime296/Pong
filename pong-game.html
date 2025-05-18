@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jeu de Pong</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #1a1a1a;
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 90vw;
+            max-width: 800px;
+            height: 60vh;
+            max-height: 500px;
+            border: 2px solid white;
+            box-sizing: border-box;
+        }
+
+        #game-canvas {
+            background-color: #000;
+            width: 100%;
+            height: 100%;
+        }
+
+        #score-display {
+            position: absolute;
+            top: 10px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #difficulty-selector {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        #difficulty-selector h2 {
+            margin-bottom: 10px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #444;
+        }
+
+        button.active {
+            background-color: #4CAF50;
+        }
+
+        #start-btn {
+            padding: 12px 30px;
+            font-size: 18px;
+            background-color: #4CAF50;
+        }
+
+        #start-btn:hover {
+            background-color: #45a049;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        #game-over h2 {
+            font-size: 32px;
+            margin-bottom: 20px;
+        }
+
+        #restart-btn {
+            padding: 12px 30px;
+            font-size: 18px;
+            background-color: #4CAF50;
+        }
+        
+        /* Animation de la ligne médiane */
+        @keyframes dashAnimation {
+            to {
+                stroke-dashoffset: 20;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Pong Game</h1>
+    
+    <div id="difficulty-selector">
+        <h2>Choisissez la difficulté</h2>
+        <div class="btn-group">
+            <button id="easy-btn" class="active">Facile</button>
+            <button id="medium-btn">Moyen</button>
+            <button id="hard-btn">Difficile</button>
+        </div>
+        <button id="start-btn">Commencer le jeu</button>
+    </div>
+    
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <div id="score-display">0 - 0</div>
+        
+        <div id="game-over">
+            <h2 id="winner-text">Vous avez gagné !</h2>
+            <button id="restart-btn">Rejouer</button>
+        </div>
+    </div>
+
+    <script>
+        // Sélection des éléments du DOM
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score-display');
+        const difficultySelector = document.getElementById('difficulty-selector');
+        const startBtn = document.getElementById('start-btn');
+        const easyBtn = document.getElementById('easy-btn');
+        const mediumBtn = document.getElementById('medium-btn');
+        const hardBtn = document.getElementById('hard-btn');
+        const gameOverScreen = document.getElementById('game-over');
+        const winnerText = document.getElementById('winner-text');
+        const restartBtn = document.getElementById('restart-btn');
+        
+        // Variables du jeu
+        let gameRunning = false;
+        let animationFrameId;
+        let lastTimestamp = 0;
+        
+        // Configuration de la difficulté
+        let difficulty = 'easy'; // Par défaut
+        const difficulties = {
+            easy: {
+                botSpeed: 0.4,     // Vitesse de réaction du bot (plus c'est bas, plus c'est lent)
+                errorMargin: 50,   // Marge d'erreur pour le bot (plus c'est élevé, plus le bot fait d'erreurs)
+                missChance: 0.1    // Probabilité que le bot rate délibérément la balle
+            },
+            medium: {
+                botSpeed: 0.65,
+                errorMargin: 25,
+                missChance: 0.05
+            },
+            hard: {
+                botSpeed: 0.9,
+                errorMargin: 10,
+                missChance: 0.01
+            }
+        };
+        
+        // Configuration des objets du jeu
+        let paddleHeight, paddleWidth, paddleSpeed, ballSize, ballSpeed;
+        let player, bot, ball, playerScore, botScore;
+        
+        // Gestion des touches
+        const keys = {
+            ArrowUp: false,
+            ArrowDown: false
+        };
+        
+        // Fonction pour initialiser le canvas
+        function initCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            
+            // Définir les dimensions en fonction de la taille du canvas
+            paddleHeight = canvas.height * 0.15;
+            paddleWidth = canvas.width * 0.015;
+            paddleSpeed = canvas.height * 0.8; // Unités par seconde
+            ballSize = canvas.width * 0.02;
+            ballSpeed = canvas.width * 0.4; // Vitesse de base
+        }
+        
+        // Fonction pour initialiser les objets du jeu
+        function initGame() {
+            playerScore = 0;
+            botScore = 0;
+            updateScore();
+            
+            // Initialiser les raquettes
+            player = {
+                x: paddleWidth * 2,
+                y: canvas.height / 2 - paddleHeight / 2,
+                width: paddleWidth,
+                height: paddleHeight,
+                speed: paddleSpeed
+            };
+            
+            bot = {
+                x: canvas.width - paddleWidth * 3,
+                y: canvas.height / 2 - paddleHeight / 2,
+                width: paddleWidth,
+                height: paddleHeight,
+                speed: paddleSpeed
+            };
+            
+            resetBall();
+        }
+        
+        // Fonction pour réinitialiser la balle après un point
+        function resetBall() {
+            // Angle aléatoire entre -45° et 45° ou 135° et 225°
+            let angle;
+            if (Math.random() < 0.5) {
+                // Vers la droite (joueur)
+                angle = Math.random() * Math.PI / 2 - Math.PI / 4;
+            } else {
+                // Vers la gauche (bot)
+                angle = Math.random() * Math.PI / 2 - Math.PI / 4 + Math.PI;
+            }
+            
+            ball = {
+                x: canvas.width / 2,
+                y: canvas.height / 2,
+                size: ballSize,
+                speedX: ballSpeed * Math.cos(angle),
+                speedY: ballSpeed * Math.sin(angle),
+                speed: ballSpeed
+            };
+        }
+        
+        // Mise à jour du score
+        function updateScore() {
+            scoreDisplay.textContent = `${playerScore} - ${botScore}`;
+        }
+        
+        // Fonction pour démarrer le jeu
+        function startGame() {
+            if (gameRunning) return;
+            
+            initCanvas();
+            initGame();
+            
+            difficultySelector.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            
+            // Activer les écouteurs d'événements
+            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('keyup', handleKeyUp);
+            window.addEventListener('resize', handleResize);
+            
+            gameRunning = true;
+            lastTimestamp = performance.now();
+            gameLoop(lastTimestamp);
+        }
+        
+        // Gestion du redimensionnement
+        function handleResize() {
+            // Sauvegarde des positions relatives
+            const playerRelY = player.y / canvas.height;
+            const botRelY = bot.y / canvas.height;
+            const ballRelX = ball.x / canvas.width;
+            const ballRelY = ball.y / canvas.height;
+            
+            initCanvas();
+            
+            // Redimensionner les objets
+            player.width = paddleWidth;
+            player.height = paddleHeight;
+            player.y = playerRelY * canvas.height;
+            player.speed = paddleSpeed;
+            player.x = paddleWidth * 2;
+            
+            bot.width = paddleWidth;
+            bot.height = paddleHeight;
+            bot.y = botRelY * canvas.height;
+            bot.speed = paddleSpeed;
+            bot.x = canvas.width - paddleWidth * 3;
+            
+            ball.size = ballSize;
+            ball.x = ballRelX * canvas.width;
+            ball.y = ballRelY * canvas.height;
+            
+            // Ajuster les vitesses
+            const currentSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+            const ratio = ballSpeed / currentSpeed;
+            ball.speedX *= ratio;
+            ball.speedY *= ratio;
+        }
+        
+        // Gestion des entrées clavier
+        function handleKeyDown(e) {
+            if (e.key in keys) {
+                keys[e.key] = true;
+                e.preventDefault();
+            }
+        }
+        
+        function handleKeyUp(e) {
+            if (e.key in keys) {
+                keys[e.key] = false;
+                e.preventDefault();
+            }
+        }
+        
+        // Fonction de mise à jour du joueur
+        function updatePlayer(deltaTime) {
+            if (keys.ArrowUp) {
+                player.y -= player.speed * deltaTime;
+            }
+            if (keys.ArrowDown) {
+                player.y += player.speed * deltaTime;
+            }
+            
+            // Limites du terrain
+            player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+        }
+        
+        // Fonction de mise à jour du bot
+        function updateBot(deltaTime) {
+            // Récupérer les paramètres de difficulté
+            const botSettings = difficulties[difficulty];
+            
+            // Position idéale : suivre la balle
+            let targetY = ball.y - bot.height / 2;
+            
+            // Ajouter une marge d'erreur aléatoire pour rendre le bot moins parfait
+            targetY += (Math.random() - 0.5) * botSettings.errorMargin;
+            
+            // Limiter aux bords du terrain
+            targetY = Math.max(0, Math.min(canvas.height - bot.height, targetY));
+            
+            // Possibilité que le bot rate délibérément la balle (uniquement si la balle se dirige vers lui)
+            if (ball.speedX > 0 && Math.random() < botSettings.missChance) {
+                // Le bot se déplace dans la mauvaise direction
+                if (bot.y < canvas.height / 2) {
+                    targetY = canvas.height - bot.height;
+                } else {
+                    targetY = 0;
+                }
+            }
+            
+            // Mouvement progressif vers la cible
+            const distance = targetY - bot.y;
+            bot.y += distance * botSettings.botSpeed * deltaTime * 3.5;
+            
+            // Limites du terrain (sécurité supplémentaire)
+            bot.y = Math.max(0, Math.min(canvas.height - bot.height, bot.y));
+        }
+        
+        // Fonction de mise à jour de la balle
+        function updateBall(deltaTime) {
+            // Déplacer la balle
+            ball.x += ball.speedX * deltaTime;
+            ball.y += ball.speedY * deltaTime;
+            
+            // Collisions avec les murs (haut/bas)
+            if (ball.y <= 0 || ball.y + ball.size >= canvas.height) {
+                ball.speedY = -ball.speedY;
+                // Assurer que la balle ne reste pas coincée
+                ball.y = ball.y <= 0 ? 0 : canvas.height - ball.size;
+            }
+            
+            // Collision avec la raquette du joueur
+            if (
+                ball.x <= player.x + player.width &&
+                ball.x + ball.size >= player.x &&
+                ball.y + ball.size >= player.y &&
+                ball.y <= player.y + player.height
+            ) {
+                handlePaddleCollision(player);
+            }
+            
+            // Collision avec la raquette du bot
+            if (
+                ball.x + ball.size >= bot.x &&
+                ball.x <= bot.x + bot.width &&
+                ball.y + ball.size >= bot.y &&
+                ball.y <= bot.y + bot.height
+            ) {
+                handlePaddleCollision(bot);
+            }
+            
+            // Vérifier si un point a été marqué
+            checkScore();
+        }
+        
+        // Gestion des collisions avec les raquettes
+        function handlePaddleCollision(paddle) {
+            // Inverser la direction X
+            ball.speedX = -ball.speedX;
+            
+            // Empêcher la balle de rester coincée dans la raquette
+            if (paddle === player) {
+                ball.x = player.x + player.width;
+            } else {
+                ball.x = bot.x - ball.size;
+            }
+            
+            // Calculer où la balle a frappé la raquette (de -1 à 1, du haut vers le bas)
+            const hitPosition = (ball.y + ball.size / 2 - paddle.y) / paddle.height - 0.5;
+            
+            // Modifier l'angle en fonction de l'endroit où la balle a frappé la raquette
+            // Plus la balle frappe vers les extrémités, plus l'angle est prononcé
+            ball.speedY = hitPosition * ball.speed * 1.5;
+            
+            // Légère augmentation de la vitesse à chaque rebond pour accélérer le jeu
+            const newSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY) * 1.05;
+            const ratio = newSpeed / Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+            
+            ball.speedX *= ratio;
+            ball.speedY *= ratio;
+        }
+        
+        // Vérification du score
+        function checkScore() {
+            if (ball.x + ball.size < 0) {
+                // Point pour le bot
+                botScore++;
+                updateScore();
+                
+                if (botScore >= 10) {
+                    endGame(false);
+                } else {
+                    resetBall();
+                }
+            } else if (ball.x > canvas.width) {
+                // Point pour le joueur
+                playerScore++;
+                updateScore();
+                
+                if (playerScore >= 10) {
+                    endGame(true);
+                } else {
+                    resetBall();
+                }
+            }
+        }
+        
+        // Fin du jeu
+        function endGame(playerWins) {
+            gameRunning = false;
+            
+            // Afficher l'écran de fin
+            winnerText.textContent = playerWins ? "Vous avez gagné !" : "Le bot a gagné !";
+            gameOverScreen.style.display = 'flex';
+            
+            // Nettoyer les événements
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('resize', handleResize);
+            
+            cancelAnimationFrame(animationFrameId);
+        }
+        
+        // Fonction de dessin du jeu
+        function draw() {
+            // Effacer le canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Dessiner le fond
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Dessiner la ligne médiane
+            ctx.beginPath();
+            ctx.setLineDash([5, 15]);
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = canvas.width * 0.003;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Dessiner les raquettes
+            ctx.fillStyle = 'white';
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            ctx.fillRect(bot.x, bot.y, bot.width, bot.height);
+            
+            // Dessiner la balle
+            ctx.fillRect(ball.x, ball.y, ball.size, ball.size);
+        }
+        
+        // Boucle principale du jeu
+        function gameLoop(timestamp) {
+            if (!gameRunning) return;
+            
+            const deltaTime = (timestamp - lastTimestamp) / 1000; // Convertir en secondes
+            lastTimestamp = timestamp;
+            
+            // Limiter deltaTime pour éviter les problèmes lors des pertes de focus
+            const cappedDeltaTime = Math.min(deltaTime, 0.05);
+            
+            // Mise à jour des éléments du jeu
+            updatePlayer(cappedDeltaTime);
+            updateBot(cappedDeltaTime);
+            updateBall(cappedDeltaTime);
+            
+            // Dessiner le jeu
+            draw();
+            
+            // Continuer la boucle
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+        
+        // Gestionnaires d'événements pour l'interface
+        easyBtn.addEventListener('click', () => {
+            difficulty = 'easy';
+            easyBtn.classList.add('active');
+            mediumBtn.classList.remove('active');
+            hardBtn.classList.remove('active');
+        });
+        
+        mediumBtn.addEventListener('click', () => {
+            difficulty = 'medium';
+            easyBtn.classList.remove('active');
+            mediumBtn.classList.add('active');
+            hardBtn.classList.remove('active');
+        });
+        
+        hardBtn.addEventListener('click', () => {
+            difficulty = 'hard';
+            easyBtn.classList.remove('active');
+            mediumBtn.classList.remove('active');
+            hardBtn.classList.add('active');
+        });
+        
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', () => {
+            difficultySelector.style.display = 'flex';
+            gameOverScreen.style.display = 'none';
+        });
+        
+        // Support tactile pour les appareils mobiles
+        let touchStartY = 0;
+        
+        canvas.addEventListener('touchstart', (e) => {
+            touchStartY = e.touches[0].clientY;
+            e.preventDefault();
+        }, { passive: false });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            const touchY = e.touches[0].clientY;
+            const canvasRect = canvas.getBoundingClientRect();
+            
+            // Calculer la position relative dans le canvas
+            const relativeY = (touchY - canvasRect.top) / canvasRect.height;
+            
+            // Positionner la raquette du joueur directement
+            player.y = (relativeY * canvas.height) - (player.height / 2);
+            
+            // Limites du terrain
+            player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+            
+            e.preventDefault();
+        }, { passive: false });
+    </script>
+</body>
+</html>
